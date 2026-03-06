@@ -148,11 +148,19 @@ def render_svg(
             parts.append(
                 f'<text class="axis-label" x="{x}" y="{label_margin * 0.5}">{j + 1}</text>'
             )
+            # 底部列号
+            parts.append(
+                f'<text class="axis-label" x="{x}" y="{label_margin + grid_h + label_margin * 0.5}">{j + 1}</text>'
+            )
         for i in range(rows):
             y = i * cell_size + label_margin + cell_size / 2
             # 左侧行号
             parts.append(
                 f'<text class="axis-label" x="{label_margin * 0.5}" y="{y}">{i + 1}</text>'
+            )
+            # 右侧行号
+            parts.append(
+                f'<text class="axis-label" x="{label_margin + grid_w + label_margin * 0.5}" y="{y}">{i + 1}</text>'
             )
 
     parts.append("</g>")

@@ -24,7 +24,7 @@
  ══════════════════════════════════════════════════════════════
 */
 
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useMemo, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
 import {
     Upload,
@@ -33,6 +33,7 @@ import {
     Settings,
     Loader2,
     Palette,
+    Tag,
     ChevronDown,
     ChevronUp,
     XCircle,
@@ -51,7 +52,7 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 
-import { API_BASE, POPBEADS_LOGO_PATH } from "@/lib/constants";
+import { API_BASE, POPBEADS_LOGO_PATH, POPBEADS_LOGO_VIEWBOX } from "@/lib/constants";
 
 /* ── 二选一切换按钮组（复用桌面端同款） ── */
 function ToggleGroup({
@@ -142,6 +143,7 @@ export default function MobileGeneratorPage() {
     const [svgContent, setSvgContent] = useState<string | null>(null);
     const [stats, setStats] = useState<any>(null);
     const [isGenerating, setIsGenerating] = useState(false);
+    const [showColorCodes, setShowColorCodes] = useState(true);
     const [highlightHex, setHighlightHex] = useState<string | null>(null);
     const [grayscaleMode, setGrayscaleMode] = useState(false);
 
@@ -152,10 +154,18 @@ export default function MobileGeneratorPage() {
     const [dithering, setDithering] = useState("none");
     const [pixelStyle, setPixelStyle] = useState("square");
     const [maxColors, setMaxColors] = useState("0");
+    const [mergeThreshold, setMergeThreshold] = useState([0]);
 
     /* ── 导出菜单 & 统计展开 ── */
     const [showExportMenu, setShowExportMenu] = useState(false);
     const [showStats, setShowStats] = useState(false);
+
+    // Close export menu on outside click
+    useEffect(() => {
+        const handler = () => setShowExportMenu(false);
+        if (showExportMenu) document.addEventListener("click", handler);
+        return () => document.removeEventListener("click", handler);
+    }, [showExportMenu]);
 
     /* ── 文件上传 ── */
     const onDrop = useCallback((acceptedFiles: File[]) => {
@@ -193,6 +203,7 @@ export default function MobileGeneratorPage() {
         );
         formData.append("resize_mode", "fit");
         formData.append("max_colors", maxColors);
+        formData.append("merge_threshold", mergeThreshold[0].toString());
         formData.append("pixel_style", (pixelStyle !== "square").toString());
         formData.append("grayscale", grayscaleMode.toString());
 
@@ -304,29 +315,37 @@ export default function MobileGeneratorPage() {
     /* ── Compute highlighted SVG (same logic as desktop) ── */
     const displaySvg = useMemo(() => {
         if (!svgContent) return '';
-        if (!highlightHex) return svgContent;
 
-        // Inject highlight-active class on the grid group
-        let svg = svgContent.replace(
-            '<g id="bead-grid">',
-            '<g id="bead-grid" class="highlight-active">'
-        );
+        let svg = svgContent;
 
-        // Add hl-match class to matching rects/circles whose data-hex matches
-        const escaped = highlightHex.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        svg = svg.replace(
-            new RegExp('(<(?:rect|circle) )([^>]*data-hex="' + escaped + '"[^>]*/>)', 'g'),
-            '$1class="hl-match" $2'
-        );
+        // Apply hide-labels class based on state (matches global CSS logic)
+        if (!showColorCodes) {
+            svg = svg.replace('<svg ', '<svg class="hide-labels" ');
+        }
 
-        // Add hl-match to text labels immediately following a matched element
-        svg = svg.replace(
-            new RegExp('(class="hl-match" [^/]*/>\\n<text class=")(color-label")', 'g'),
-            '$1hl-match $2'
-        );
+        if (highlightHex) {
+            // Inject highlight-active class on the grid group
+            svg = svg.replace(
+                '<g id="bead-grid">',
+                '<g id="bead-grid" class="highlight-active">'
+            );
+
+            // Add hl-match class to matching rects/circles whose data-hex matches
+            const escaped = highlightHex.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            svg = svg.replace(
+                new RegExp('(<(?:rect|circle) )([^>]*data-hex="' + escaped + '"[^>]*/>)', 'g'),
+                '$1class="hl-match" $2'
+            );
+
+            // Add hl-match to text labels immediately following a matched element
+            svg = svg.replace(
+                new RegExp('(class="hl-match" [^/]*/>\\n<text class=")(color-label")', 'g'),
+                '$1hl-match $2'
+            );
+        }
 
         return svg;
-    }, [svgContent, highlightHex]);
+    }, [svgContent, highlightHex, showColorCodes]);
 
     /* ══ 渲染 ══ */
     return (
@@ -334,7 +353,7 @@ export default function MobileGeneratorPage() {
             {/* ── 顶部品牌栏 (sticky) ── */}
             <header className="sticky top-0 z-40 flex items-center justify-between px-4 h-12 bg-white border-b border-neutral-200/60">
                 <svg
-                    viewBox="0 1 31 5"
+                    viewBox={POPBEADS_LOGO_VIEWBOX}
                     className="w-[120px] text-neutral-800"
                     shapeRendering="crispEdges"
                 >
@@ -353,7 +372,7 @@ export default function MobileGeneratorPage() {
                     {!preview ? (
                         <div
                             {...getRootProps()}
-                            className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all duration-200 active:scale-[0.98]
+                            className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all duration-200 active:scale-95
                 ${isDragActive
                                     ? "border-neutral-400 bg-neutral-100"
                                     : "border-neutral-200 bg-white"
@@ -412,6 +431,9 @@ export default function MobileGeneratorPage() {
                             <div className="text-[13px] font-medium text-neutral-700 font-pingfang">
                                 网格尺寸
                             </div>
+                            <p className="text-[11px] text-neutral-400 leading-relaxed -mt-1">
+                                控制图纸的分辨率，数值越大细节越多
+                            </p>
                             <ToggleGroup
                                 value={sizeMode}
                                 onChange={setSizeMode}
@@ -447,9 +469,10 @@ export default function MobileGeneratorPage() {
                         {/* 配色数量 */}
                         <div className="space-y-2">
                             <div className="text-[13px] font-medium text-neutral-700 font-pingfang">
-                                配色数量
-                            </div>
-                            <Select value={maxColors} onValueChange={setMaxColors}>
+                                配色数量 <span className="text-[10px] text-neutral-400 font-normal ml-1 border border-neutral-200 px-1 py-0.5 rounded-md relative -top-[1px]">Mard 色号</span>
+                            </div>                            <p className="text-[11px] text-neutral-400 leading-relaxed -mt-1">
+                                根据你实际拥有的拼豆色板选择可用颜色数
+                            </p>                            <Select value={maxColors} onValueChange={setMaxColors}>
                                 <SelectTrigger className="h-9 text-sm rounded-lg">
                                     <SelectValue />
                                 </SelectTrigger>
@@ -464,6 +487,29 @@ export default function MobileGeneratorPage() {
                             </Select>
                         </div>
 
+                        {/* 合并相似色 */}
+                        <div className="space-y-2 mt-1">
+                            <div className="flex items-center justify-between">
+                                <div className="text-[13px] font-medium text-neutral-700 font-pingfang">
+                                    合并相似色
+                                </div>
+                                <span className="text-[12px] font-mono text-neutral-400 tabular-nums">
+                                    {mergeThreshold[0] === 0 ? '关闭' : mergeThreshold[0]}
+                                </span>
+                            </div>
+                            <p className="text-[11px] text-neutral-400 leading-relaxed">
+                                将色差接近的颜色合并，减少零星颜色种类
+                            </p>
+                            <Slider
+                                value={mergeThreshold}
+                                onValueChange={setMergeThreshold}
+                                max={15}
+                                min={0}
+                                step={1}
+                                className="w-full"
+                            />
+                        </div>
+
                         <div className="h-px bg-neutral-100" />
 
                         {/* 颜色匹配 */}
@@ -471,6 +517,9 @@ export default function MobileGeneratorPage() {
                             <div className="text-[13px] font-medium text-neutral-700 font-pingfang">
                                 颜色匹配
                             </div>
+                            <p className="text-[11px] text-neutral-400 leading-relaxed -mt-1">
+                                Lab 模式按人眼感知匹配最近颜色，效果更自然<br />RGB 模式按数值直接匹配
+                            </p>
                             <ToggleGroup
                                 value={quantization}
                                 onChange={setQuantization}
@@ -484,29 +533,39 @@ export default function MobileGeneratorPage() {
                         <div className="h-px bg-neutral-100" />
 
                         {/* 抖动处理 */}
-                        <div className="flex items-center justify-between py-1">
-                            <div className="text-[13px] font-medium text-neutral-700 font-pingfang">
-                                抖动处理
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between py-1">
+                                <div className="text-[13px] font-medium text-neutral-700 font-pingfang">
+                                    抖动处理
+                                </div>
+                                <Switch
+                                    checked={dithering === "floyd_steinberg"}
+                                    onCheckedChange={(v) =>
+                                        setDithering(v ? "floyd_steinberg" : "none")
+                                    }
+                                />
                             </div>
-                            <Switch
-                                checked={dithering === "floyd_steinberg"}
-                                onCheckedChange={(v) =>
-                                    setDithering(v ? "floyd_steinberg" : "none")
-                                }
-                            />
+                            <p className="text-[11px] text-neutral-400 leading-relaxed -mt-1">
+                                开启后颜色过渡更平滑，适合渐变多的图片<br />关闭则保持纯色填充
+                            </p>
                         </div>
 
                         <div className="h-px bg-neutral-100" />
 
                         {/* 单色模式 */}
-                        <div className="flex items-center justify-between py-1">
-                            <div className="text-[13px] font-medium text-neutral-700 font-pingfang">
-                                单色模式
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between py-1">
+                                <div className="text-[13px] font-medium text-neutral-700 font-pingfang">
+                                    单色模式
+                                </div>
+                                <Switch
+                                    checked={grayscaleMode}
+                                    onCheckedChange={setGrayscaleMode}
+                                />
                             </div>
-                            <Switch
-                                checked={grayscaleMode}
-                                onCheckedChange={setGrayscaleMode}
-                            />
+                            <p className="text-[11px] text-neutral-400 leading-relaxed -mt-1">
+                                开启后图纸以灰度显示
+                            </p>
                         </div>
 
                         <div className="h-px bg-neutral-100" />
@@ -516,6 +575,9 @@ export default function MobileGeneratorPage() {
                             <div className="text-[13px] font-medium text-neutral-700 font-pingfang">
                                 珠子样式
                             </div>
+                            <p className="text-[11px] text-neutral-400 leading-relaxed -mt-1">
+                                方形适合查看像素效果，圆形更贴近实际拼豆成品
+                            </p>
                             <ToggleGroup
                                 value={pixelStyle}
                                 onChange={setPixelStyle}
@@ -542,16 +604,64 @@ export default function MobileGeneratorPage() {
 
                 {svgContent && !isGenerating && (
                     <div className="mx-4 mt-4 rounded-2xl bg-white border border-neutral-200 overflow-hidden relative">
-                        {highlightHex && (
-                            <button
-                                type="button"
-                                className="absolute top-2 right-2 z-10 flex items-center gap-1.5 bg-white/90 backdrop-blur-sm border border-neutral-200 rounded-full px-2.5 py-1 text-[11px] text-neutral-600 shadow-sm active:scale-95 transition-all duration-200"
-                                onClick={() => setHighlightHex(null)}
-                            >
-                                <span className="w-2.5 h-2.5 rounded-full border border-black/10" style={{ backgroundColor: highlightHex }} />
-                                取消高亮
-                            </button>
-                        )}
+                        <div className="absolute top-2 right-2 z-20 flex flex-col gap-2 items-end">
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    className="flex items-center gap-1.5 bg-white/90 backdrop-blur-sm border border-neutral-200 rounded-full px-2.5 py-1.5 text-[11px] text-neutral-600 shadow-sm active:scale-90 transition-transform duration-200"
+                                    onClick={() => setShowColorCodes(!showColorCodes)}
+                                >
+                                    <Tag className="w-3.5 h-3.5" />
+                                    {showColorCodes ? "隐藏色号" : "显示色号"}
+                                </button>
+
+                                <div className="relative">
+                                    <button
+                                        type="button"
+                                        className="flex items-center gap-1.5 bg-white/90 backdrop-blur-sm border border-neutral-200 rounded-full px-2.5 py-1.5 text-[11px] text-neutral-600 shadow-sm active:scale-90 transition-transform duration-200"
+                                        onClick={(e) => { e.stopPropagation(); setShowExportMenu(!showExportMenu); }}
+                                    >
+                                        <Download className="w-3.5 h-3.5" />
+                                        导出图纸
+                                    </button>
+
+                                    {showExportMenu && (
+                                        <div className="absolute top-full right-0 mt-2 bg-white/95 backdrop-blur-md border border-neutral-200 rounded-xl shadow-lg flex flex-col w-[104px] overflow-hidden z-50 transition-all duration-200" onClick={(e) => e.stopPropagation()}>
+                                            <button
+                                                className="px-3 py-2.5 text-xs text-left text-neutral-600 hover:bg-neutral-50 active:bg-neutral-100 flex items-center gap-2 border-b border-neutral-100"
+                                                onClick={() => { exportSVG(); setShowExportMenu(false); }}>
+                                                SVG 矢量图
+                                            </button>
+                                            <button
+                                                className="px-3 py-2.5 text-xs text-left text-neutral-600 hover:bg-neutral-50 active:bg-neutral-100 flex items-center gap-2 border-b border-neutral-100"
+                                                onClick={() => { exportBitmap("png"); setShowExportMenu(false); }}>
+                                                PNG 位图
+                                            </button>
+                                            <button
+                                                className="px-3 py-2.5 text-xs text-left text-neutral-600 hover:bg-neutral-50 active:bg-neutral-100 flex items-center gap-2 border-b border-neutral-100"
+                                                onClick={() => { exportBitmap("jpg"); setShowExportMenu(false); }}>
+                                                JPG 位图
+                                            </button>
+                                            <button
+                                                className="px-3 py-2.5 text-xs text-left text-neutral-600 hover:bg-neutral-50 active:bg-neutral-100 flex items-center gap-2"
+                                                onClick={() => { exportPDF(); setShowExportMenu(false); }}>
+                                                PDF 文档
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            {highlightHex && (
+                                <button
+                                    type="button"
+                                    className="flex items-center gap-1.5 bg-white/90 backdrop-blur-sm border border-neutral-200 rounded-full px-2.5 py-1 text-[11px] text-neutral-600 shadow-sm active:scale-90 transition-transform duration-200"
+                                    onClick={() => setHighlightHex(null)}
+                                >
+                                    <span className="w-2.5 h-2.5 rounded-full border border-black/10" style={{ backgroundColor: highlightHex }} />
+                                    取消高亮
+                                </button>
+                            )}
+                        </div>
                         <div
                             className="w-full overflow-x-auto"
                             dangerouslySetInnerHTML={{
@@ -585,7 +695,7 @@ export default function MobileGeneratorPage() {
                                 {stats.color_table?.map((c: any, i: number) => (
                                     <div
                                         key={i}
-                                        className={`flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-all duration-200 text-xs active:scale-[0.97]
+                                        className={`flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-all duration-200 text-xs active:scale-90
                       ${highlightHex === c.hex
                                                 ? "bg-neutral-100 ring-1 ring-neutral-300"
                                                 : "hover:bg-neutral-50"
@@ -626,55 +736,12 @@ export default function MobileGeneratorPage() {
                         </Accordion>
                     </div>
                 )}
-
-                {/* ── 导出按钮组 ── */}
-                {svgContent && !isGenerating && (
-                    <div className="px-4 mt-4 mb-4">
-                        <div className="text-[13px] font-medium text-neutral-700 font-pingfang mb-2.5">
-                            导出图纸
-                        </div>
-                        <div className="grid grid-cols-2 gap-2.5">
-                            <Button
-                                variant="outline"
-                                className="h-11 rounded-xl text-sm gap-2 active:scale-[0.97] transition-all"
-                                onClick={exportSVG}
-                            >
-                                <Download className="w-4 h-4" />
-                                SVG 矢量图
-                            </Button>
-                            <Button
-                                variant="outline"
-                                className="h-11 rounded-xl text-sm gap-2 active:scale-[0.97] transition-all"
-                                onClick={() => exportBitmap("png")}
-                            >
-                                <Download className="w-4 h-4" />
-                                PNG 位图
-                            </Button>
-                            <Button
-                                variant="outline"
-                                className="h-11 rounded-xl text-sm gap-2 active:scale-[0.97] transition-all"
-                                onClick={() => exportBitmap("jpg")}
-                            >
-                                <Download className="w-4 h-4" />
-                                JPG 位图
-                            </Button>
-                            <Button
-                                variant="outline"
-                                className="h-11 rounded-xl text-sm gap-2 active:scale-[0.97] transition-all"
-                                onClick={exportPDF}
-                            >
-                                <Download className="w-4 h-4" />
-                                PDF 文档
-                            </Button>
-                        </div>
-                    </div>
-                )}
             </div>
 
             {/* ── 底部固定生成按钮 ── */}
             <div className="sticky bottom-0 z-40 px-4 py-3 bg-white/90 backdrop-blur-md border-t border-neutral-200/60">
                 <Button
-                    className="w-full bg-neutral-900 hover:bg-neutral-800 text-white h-12 font-medium rounded-xl text-[15px] tracking-wide active:scale-[0.98] active:bg-neutral-950 transition-all duration-200"
+                    className="w-full bg-neutral-900 hover:bg-neutral-800 text-white h-12 font-medium rounded-xl text-[15px] tracking-wide active:scale-95 active:bg-neutral-950 transition-all duration-200"
                     onClick={handleGenerate}
                     disabled={!file || isGenerating}
                 >

@@ -45,7 +45,7 @@ import { Input } from "@/components/ui/input";
 
 import { useMediaQuery } from "@/lib/use-media-query";
 import MobileGeneratorPage from "./mobile-page";
-import { API_BASE, POPBEADS_LOGO_PATH } from "@/lib/constants";
+import { API_BASE, POPBEADS_LOGO_PATH, POPBEADS_LOGO_VIEWBOX } from "@/lib/constants";
 
 /**
  * 二选一切换按钮组 — 用于「按高度/按宽度」「Lab/RGB」「方形/圆形」等二选一场景
@@ -131,6 +131,7 @@ function DesktopGeneratorPage() {
   const [resizeMode, setResizeMode] = useState('fit');          // 'fit' | 'stretch' | 'pad' — 图片缩放模式
   const [pixelStyle, setPixelStyle] = useState('square');       // 'square' | 'circle' — 珠子形状
   const [maxColors, setMaxColors] = useState('0');              // '0' = 全部 221 色，其他限制色数
+  const [mergeThreshold, setMergeThreshold] = useState([0]);    // 合并相似色阈值 (0=不合并, 1~15)
 
   /* ── 导出菜单 ─────────────────────────────────────────────── */
   const [showExportMenu, setShowExportMenu] = useState(false);  // 导出下拉菜单是否展开
@@ -169,6 +170,7 @@ function DesktopGeneratorPage() {
     formData.append('dithering', (dithering === 'floyd_steinberg').toString());
     formData.append('resize_mode', resizeMode);
     formData.append('max_colors', maxColors);
+    formData.append('merge_threshold', mergeThreshold[0].toString());
     formData.append('pixel_style', (pixelStyle !== 'square').toString());
     formData.append('grayscale', grayscaleMode.toString());
 
@@ -449,7 +451,7 @@ function DesktopGeneratorPage() {
               border-b: 底部分割线
               图标: 定制像素风 Logo */}
           <div className="flex items-center justify-start gap-2.5 px-5 h-14 border-b border-neutral-200/60 flex-shrink-0">
-            <svg viewBox="0 1 31 5" className="w-[140px] text-neutral-800" shapeRendering="crispEdges">
+            <svg viewBox={POPBEADS_LOGO_VIEWBOX} className="w-[140px] text-neutral-800" shapeRendering="crispEdges">
               <path fill="currentColor" d={POPBEADS_LOGO_PATH} />
             </svg>
             <h1 className="sr-only">PopBeads</h1>
@@ -565,7 +567,7 @@ function DesktopGeneratorPage() {
               {/* Colors */}
               <div className="space-y-1">
                 <div className="text-[13px] font-medium text-neutral-700 tracking-wide font-pingfang">
-                  配色数量
+                  配色数量 <span className="text-[10px] text-neutral-400 font-normal ml-1 border border-neutral-200 px-1 py-0.5 rounded-md relative -top-[1px]">Mard</span>
                 </div>
                 <p className="text-[11px] text-neutral-400 leading-relaxed">
                   根据你实际拥有的拼豆色板选择可用颜色数
@@ -581,6 +583,29 @@ function DesktopGeneratorPage() {
                     <SelectItem value="24">24 色（迷你套装）</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+
+              {/* 合并相似色 */}
+              <div className="space-y-1 mt-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-[13px] font-medium text-neutral-700 tracking-wide font-pingfang">
+                    合并相似色
+                  </div>
+                  <span className="text-[12px] font-mono text-neutral-400 tabular-nums">
+                    {mergeThreshold[0] === 0 ? '关闭' : mergeThreshold[0]}
+                  </span>
+                </div>
+                <p className="text-[11px] text-neutral-400 leading-relaxed">
+                  将色差接近的颜色合并，减少零星颜色种类
+                </p>
+                <Slider
+                  value={mergeThreshold}
+                  onValueChange={setMergeThreshold}
+                  max={15}
+                  min={0}
+                  step={1}
+                  className="w-full"
+                />
               </div>
 
               <div className="h-px bg-neutral-100" />

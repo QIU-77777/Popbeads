@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { Slider as SliderPrimitive } from "radix-ui"
+import { motion } from "framer-motion"
 
 import { cn } from "@/lib/utils"
 
@@ -42,19 +43,37 @@ function Slider({
           "relative grow overflow-hidden rounded-full bg-muted data-[orientation=horizontal]:h-1.5 data-[orientation=horizontal]:w-full data-[orientation=vertical]:h-full data-[orientation=vertical]:w-1.5"
         )}
       >
-        <SliderPrimitive.Range
-          data-slot="slider-range"
-          className={cn(
-            "absolute bg-primary data-[orientation=horizontal]:h-full data-[orientation=vertical]:w-full transition-all duration-150 ease-out"
-          )}
-        />
+        <SliderPrimitive.Range asChild>
+          <motion.div
+            layout
+            transition={{
+              type: "spring",
+              stiffness: 500,
+              damping: 30,
+              mass: 0.5,
+            }}
+            data-slot="slider-range"
+            className={cn(
+              "absolute bg-primary data-[orientation=horizontal]:h-full data-[orientation=vertical]:w-full"
+            )}
+          />
+        </SliderPrimitive.Range>
       </SliderPrimitive.Track>
       {Array.from({ length: _values.length }, (_, index) => (
-        <SliderPrimitive.Thumb
-          data-slot="slider-thumb"
-          key={index}
-          className="block size-4 shrink-0 rounded-full border border-primary bg-white shadow-sm ring-ring/50 transition-all duration-150 ease-out hover:ring-4 hover:scale-110 focus-visible:ring-4 focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50"
-        />
+        <SliderPrimitive.Thumb asChild key={index} data-slot="slider-thumb">
+          <motion.div
+            layout
+            whileHover={{ scale: 1.15 }}
+            whileTap={{ scale: 0.95 }}
+            transition={{
+              type: "spring",
+              stiffness: 500,
+              damping: 30,
+              mass: 0.5,
+            }}
+            className="block size-4 cursor-grab active:cursor-grabbing shrink-0 rounded-full border border-primary bg-white shadow-sm ring-ring/50 focus-visible:ring-4 focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50"
+          />
+        </SliderPrimitive.Thumb>
       ))}
     </SliderPrimitive.Root>
   )
