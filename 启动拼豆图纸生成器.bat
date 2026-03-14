@@ -47,6 +47,14 @@ if exist "%PYTHON_EXE%" (
     echo [INFO] Using system Python from PATH.
 )
 
+rem 检查并安装 python-dotenv（新增依赖）
+echo [INFO] Checking python-dotenv...
+"%PYTHON_EXE%" -m pip show python-dotenv >nul 2>nul
+if errorlevel 1 (
+    echo [INFO] Installing python-dotenv...
+    "%PYTHON_EXE%" -m pip install python-dotenv -q
+)
+
 where %NPM_EXE% >nul 2>nul
 if errorlevel 1 (
     echo [ERROR] npm.cmd was not found. Install Node.js first.

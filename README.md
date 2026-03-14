@@ -9,9 +9,9 @@
 [![Next.js 16](https://img.shields.io/badge/Next.js-16-black.svg?logo=next.js)](https://nextjs.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 
-上传 JPG / PNG / WEBP 图片 → 自动匹配 221 种 Mard 官方拼豆色 → 生成带色号标注的 SVG 矢量图纸 + 颜色用量统计
+上传 JPG / PNG / WEBP 图片 →（可选）AI 风格化编辑 → 自动匹配 221 种 Mard 官方拼豆色 → 生成带色号标注的 SVG 矢量图纸 + 颜色用量统计
 
-[快速开始](#-快速开始) · [功能特性](#-功能特性) · [API 文档](#-api-文档) · [项目结构](#-项目结构) · [部署](#-部署) · [贡献指南](#-贡献)
+[快速开始](#-快速开始) · [功能特性](#-功能特性) · [AI 图片编辑](#-ai-图片编辑) · [API 文档](#-api-文档) · [项目结构](#-项目结构) · [部署](#-部署) · [贡献指南](#-贡献)
 
 </div>
 
@@ -44,13 +44,22 @@
 - **多格式导出** — SVG / PNG / JPG / PDF 一键下载
 - **颜色高亮** — 点击统计面板中的颜色，图纸上对应色块高亮显示
 
+### 🤖 AI 图片编辑（新功能）
+
+- **AI 风格化** — 上传图片后可输入提示词，调用 AI 模型对图片进行风格化编辑（如：转换为像素艺术风格、卡通风格等）
+- **一键覆盖** — AI 生成结果自动替换原图，直接用于后续图纸生成，无需手动重新上传
+- **生成记录存档** — 每次 AI 生成的提示词、模型、原文件名、结果 URL 自动写入本地 SQLite 数据库（`ai_images/ai_images.db`）
+- **用户隔离** — 浏览器自动生成唯一 Session ID（存于 localStorage），写入 DB 便于区分多用户
+- **图片悬浮预览** — 桌面端鼠标悬浮图片时在右侧弹出放大预览；移动端点击图片全屏预览
+
 ## 🛠️ 技术栈
 
-| 层       | 技术                                                           |
-| -------- | -------------------------------------------------------------- |
-| **前端** | Next.js 16 · React 19 · Tailwind CSS v4 · shadcn/ui · Radix UI |
-| **后端** | FastAPI · Uvicorn · Pillow · NumPy · OpenCV                    |
-| **语言** | TypeScript · Python 3.10+                                      |
+| 层       | 技术                                                                         |
+| -------- | ---------------------------------------------------------------------------- |
+| **前端** | Next.js 16 · React 19 · Tailwind CSS v4 · shadcn/ui · Radix UI               |
+| **后端** | FastAPI · Uvicorn · Pillow · NumPy · OpenCV · requests                       |
+| **存储** | SQLite（AI 生成记录）· IndexedDB（前端图片缓存）· localStorage（参数持久化） |
+| **语言** | TypeScript · Python 3.10+                                                    |
 
 ## 🚀 快速开始
 
@@ -67,7 +76,22 @@ git clone https://github.com/your-username/popbeads.git
 cd popbeads
 ```
 
-### 2. 启动后端
+### 2. 配置环境变量（可选，AI 编辑功能需要）
+
+复制 `.env.example` 为 `.env` 并填入配置：
+
+```bash
+cp .env.example .env
+```
+
+```env
+# AI 图片编辑 API 配置（不配置则 AI 编辑功能不可用）
+IMAGE_EDIT_API_KEY=your_api_key_here
+IMAGE_EDIT_BASE_URL=https://image.onerouter.pro/v1/images/edits
+IMAGE_EDIT_MODEL=google/nano-banana-image-to-image
+```
+
+### 3. 启动后端
 
 ```bash
 cd backend
@@ -76,8 +100,9 @@ python main.py
 ```
 
 后端启动在 `http://localhost:8000`，可通过 `GET /api/health` 验证。
+运行日志同时写入终端和 `backend/pingdou.log`。
 
-### 3. 启动前端
+### 4. 启动前端
 
 ```bash
 cd frontend
@@ -87,26 +112,23 @@ npm run dev
 
 打开 `http://localhost:3000` 即可使用。
 
-### 4.（可选）安装额外依赖
+### 5.（可选）安装额外依赖
 
 ```bash
-# PDF 导出支持
+# PDF 导出支持（二选一）
 pip install cairosvg
 # 或
 pip install svglib reportlab
-
-# AI 背景处理
-pip install rembg
 ```
 
 ### 依赖文件一览
 
-| 文件                        | 用途                                           |
-| --------------------------- | ---------------------------------------------- |
-| `requirements.txt`          | 后端核心依赖（FastAPI、Pillow、NumPy、OpenCV） |
-| `requirements-optional.txt` | 可选依赖（cairosvg、svglib、reportlab）        |
-| `requirements-dev.txt`      | 开发与测试依赖                                 |
-| `frontend/package.json`     | 前端依赖                                       |
+| 文件                        | 用途                                                     |
+| --------------------------- | -------------------------------------------------------- |
+| `requirements.txt`          | 后端核心依赖（FastAPI、Pillow、NumPy、OpenCV、requests） |
+| `requirements-optional.txt` | 可选依赖（cairosvg、svglib、reportlab，PDF 导出用）      |
+| `requirements-dev.txt`      | 开发与测试依赖                                           |
+| `frontend/package.json`     | 前端依赖                                                 |
 
 ## 📖 使用方式
 
@@ -115,9 +137,10 @@ pip install rembg
 1. 启动前后端服务
 2. 浏览器打开 `http://localhost:3000`
 3. 拖拽或点击上传图片
-4. 左侧面板调整参数（网格尺寸、配色数量、颜色匹配方式、抖动等）
-5. 点击「生成拼豆图纸」
-6. 右侧预览结果，导出所需格式
+4. **（可选）开启 AI 编辑** — 输入提示词，点击「AI 生成」，等待结果自动覆盖原图
+5. 左侧面板调整参数（网格尺寸、配色数量、颜色匹配方式、抖动等）
+6. 点击「生成拼豆图纸」
+7. 右侧预览结果，导出所需格式
 
 ### cURL 调用
 
@@ -184,6 +207,37 @@ svg_str, color_stats, table_data = generate_svg_in_memory(request)
 }
 ```
 
+### `POST /api/image/edit`
+
+调用 AI 模型对图片进行风格化编辑。
+
+| 参数 / Header  | 类型   | 说明                                          |
+| -------------- | ------ | --------------------------------------------- |
+| `file`         | File   | 原始图片（JPG / PNG / WEBP）                  |
+| `prompt`       | string | 编辑提示词（如"转换为像素艺术风格"）          |
+| `X-Session-ID` | Header | 浏览器唯一会话 ID，用于 DB 中区分用户（可选） |
+
+**响应：**
+
+```json
+{
+  "status": "success",
+  "edited_image_url": "https://...",
+  "edited_image_data": "data:image/png;base64,..."
+}
+```
+
+> `edited_image_data` 为后端预下载的 base64 dataURL，前端优先使用，避免 CORS 问题。
+
+### `GET /api/image/history`
+
+查询 AI 图片生成历史记录，按时间倒序返回。
+
+| Query Param | 类型 | 默认值 | 说明       |
+| ----------- | ---- | ------ | ---------- |
+| `limit`     | int  | `50`   | 每页条数   |
+| `offset`    | int  | `0`    | 翻页偏移量 |
+
 ### `POST /api/export/pdf`
 
 将 SVG 转换为 PDF。请求体为 SVG 字符串，`Content-Type: image/svg+xml`。
@@ -196,8 +250,11 @@ svg_str, color_stats, table_data = generate_svg_in_memory(request)
 
 ```
 popbeads/
+├── .env                           # 环境变量（本地，不提交 git）
+├── .env.example                   # 环境变量模板
 ├── backend/
-│   ├── main.py                    # FastAPI 入口（路由、CORS）
+│   ├── main.py                    # FastAPI 入口（路由、CORS、日志配置）
+│   ├── pingdou.log                # 运行日志文件（自动生成）
 │   └── src/
 │       ├── api.py                 # 编排层：参数校验 → 管线调度 → SVG 生成
 │       ├── core.py                # 类型别名、调色板缓存、rgb_to_lab
@@ -209,18 +266,23 @@ popbeads/
 │       ├── render_svg.py          # SVG 矢量图纸渲染
 │       ├── render.py              # PNG 位图图纸渲染
 │       ├── stats.py               # 颜色用量统计
-│       └── pixelart.py            # Canny 边缘检测 + HSL 描边
+│       ├── pixelart.py            # Canny 边缘检测 + HSL 描边
+│       ├── image_edit.py          # AI 图片编辑（调用外部 API）
+│       └── image_archive.py       # AI 生成记录存档（SQLite）
+├── ai_images/
+│   └── ai_images.db               # AI 生成记录数据库（自动生成）
 ├── frontend/
 │   ├── src/
 │   │   ├── app/
-│   │   │   ├── page.tsx           # 桌面端主页面（三栏布局 + 画布缩放/平移）
-│   │   │   ├── mobile-page.tsx    # 移动端页面（独立单栏布局）
+│   │   │   ├── page.tsx           # 桌面端主页面（三栏布局 + AI 编辑 + 悬浮预览）
+│   │   │   ├── mobile-page.tsx    # 移动端页面（单栏 + 点击放大预览）
 │   │   │   ├── layout.tsx         # 根布局
 │   │   │   └── globals.css        # 全局样式 + Tailwind 主题
 │   │   ├── components/ui/         # shadcn/ui 组件
 │   │   └── lib/
 │   │       ├── constants.ts       # API 地址 + Logo 路径
-│   │       └── use-media-query.ts # SSR 安全的响应式 Hook
+│   │       ├── use-media-query.ts # SSR 安全的响应式 Hook
+│   │       └── use-persistence.ts # localStorage / IndexedDB / Session ID 工具
 │   ├── package.json
 │   └── next.config.ts
 ├── requirements.txt
@@ -233,7 +295,7 @@ popbeads/
 ### 处理管线
 
 ```
-原图 → 归一化(1500px) → 缩放到网格尺寸 → [灰度转换] → [调色板缩减] → Lab/RGB 量化 → [抖动] → [合并相似色] → SVG 渲染
+原图 → [AI 风格化编辑（可选）] → 归一化(1500px) → 缩放到网格尺寸 → [灰度转换] → [调色板缩减] → Lab/RGB 量化 → [抖动] → [合并相似色] → SVG 渲染
 ```
 
 ## 🎨 内置色卡
@@ -258,9 +320,12 @@ popbeads/
 
 ### 环境变量
 
-| 变量                   | 默认值                  | 说明                        |
-| ---------------------- | ----------------------- | --------------------------- |
-| `NEXT_PUBLIC_API_BASE` | `http://localhost:8000` | 后端 API 地址（构建时注入） |
+| 变量                   | 默认值                                        | 说明                              |
+| ---------------------- | --------------------------------------------- | --------------------------------- |
+| `NEXT_PUBLIC_API_BASE` | `http://localhost:8000`                       | 后端 API 地址（前端构建时注入）   |
+| `IMAGE_EDIT_API_KEY`   | —                                             | AI 编辑 API 密钥（必填，启用 AI） |
+| `IMAGE_EDIT_BASE_URL`  | `https://image.onerouter.pro/v1/images/edits` | AI 编辑 API 端点                  |
+| `IMAGE_EDIT_MODEL`     | `google/nano-banana-image-to-image`           | AI 编辑模型名称                   |
 
 ### 生产构建
 
@@ -335,7 +400,7 @@ cd frontend && npm install
 <details>
 <summary><strong>PDF 导出报错？</strong></summary>
 
-需安装 `cairosvg` 或 `svglib + reportlab`，参见[可选依赖](#4可选安装额外依赖)。若均未安装，系统会回退到浏览器打印。
+需安装 `cairosvg` 或 `svglib + reportlab`，参见[可选依赖](#5可选安装额外依赖)。若均未安装，系统会回退到浏览器打印。
 
 </details>
 
@@ -357,6 +422,17 @@ cd frontend && npm install
 <summary><strong>「合并相似色」和「配色数量」有什么区别？</strong></summary>
 
 「配色数量」在量化**前**限定可用调色板范围（如只用 36 色套装）；「合并相似色」在量化**后**将结果中色差小于阈值的颜色合并为一种，减少零星颜色。两者可叠加使用。
+
+</details>
+
+<details>
+<summary><strong>AI 编辑功能如何配置？</strong></summary>
+
+在项目根目录创建 `.env` 文件（参考 `.env.example`），填入 `IMAGE_EDIT_API_KEY`、`IMAGE_EDIT_BASE_URL`、`IMAGE_EDIT_MODEL` 三个环境变量后重启后端即可。AI 编辑记录会自动保存到 `ai_images/ai_images.db`，可用以下命令查看：
+
+```bash
+sqlite3 ai_images/ai_images.db "SELECT * FROM ai_images;"
+```
 
 </details>
 

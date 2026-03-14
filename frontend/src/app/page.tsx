@@ -46,6 +46,13 @@ import { Input } from "@/components/ui/input";
 import { useMediaQuery } from "@/lib/use-media-query";
 import MobileGeneratorPage from "./mobile-page";
 import { API_BASE, POPBEADS_LOGO_PATH, POPBEADS_LOGO_VIEWBOX } from "@/lib/constants";
+import {
+  useLocalStorage,
+  useSessionId,
+  saveImageToIDB,
+  loadImageFromIDB,
+  clearAllImagesFromIDB,
+} from "@/lib/use-persistence";
 
 /**
  * 二选一切换按钮组 — 用于「按高度/按宽度」「Lab/RGB」「方形/圆形」等二选一场景
@@ -112,6 +119,15 @@ function DesktopGeneratorPage() {
   const [highlightHex, setHighlightHex] = useState<string | null>(null); // 当前高亮的颜色 hex 值
   const [grayscaleMode, setGrayscaleMode] = useState(false);     // 单色（灰度）显示模式
 
+  /* ── AI 图片编辑状态 ───────────────────────────────────────── */
+  const [useAIEdit, setUseAIEdit] = useState(false);            // 是否启用 AI 图片编辑
+  const [aiPrompt, setAiPrompt] = useLocalStorage('pingdou_desktop_ai_prompt', '');  // AI 编辑提示词（持久化）
+  const [isAIEditing, setIsAIEditing] = useState(false);        // AI 编辑中 loading 状态
+  const sessionId = useSessionId();                              // 浏览器唯一会话 ID（用于后端区分用户）
+
+  // 上传预览卡片 ref（备用）
+  const previewCardRef = useRef<HTMLDivElement>(null);
+
   /* ── 画布缩放与平移 ────────────────────────────────────────── */
   // 使用 ref 做拖拽性能优化，仅在停止操作时同步到 state 触发渲染
   const [scale, setScale] = useState(1);                        // 当前缩放倍率
@@ -124,17 +140,37 @@ function DesktopGeneratorPage() {
   const svgWrapperRef = useRef<HTMLDivElement>(null);   // SVG 包裹 DOM
 
   /* ── 生成器参数 ────────────────────────────────────────────── */
-  const [sizeMode, setSizeMode] = useState('height');           // 'height' | 'width' — 按行还是按列
-  const [sizeValue, setSizeValue] = useState([64]);             // 网格尺寸数值 (16~256)
-  const [quantization, setQuantization] = useState('lab');      // 'lab' | 'rgb' — 颜色匹配算法
-  const [dithering, setDithering] = useState('none');           // 'none' | 'floyd_steinberg' — 抖动处理
-  const [resizeMode, setResizeMode] = useState('fit');          // 'fit' | 'stretch' | 'pad' — 图片缩放模式
-  const [pixelStyle, setPixelStyle] = useState('square');       // 'square' | 'circle' — 珠子形状
-  const [maxColors, setMaxColors] = useState('0');              // '0' = 全部 221 色，其他限制色数
-  const [mergeThreshold, setMergeThreshold] = useState([0]);    // 合并相似色阈值 (0=不合并, 1~15)
+  const [sizeMode, setSizeMode] = useLocalStorage('pingdou_desktop_sizeMode', 'height');
+  const [sizeValue, setSizeValue] = useLocalStorage('pingdou_desktop_sizeValue', [64]);
+  const [quantization, setQuantization] = useLocalStorage('pingdou_desktop_quantization', 'lab');
+  const [dithering, setDithering] = useLocalStorage('pingdou_desktop_dithering', 'none');
+  const [resizeMode, setResizeMode] = useLocalStorage('pingdou_desktop_resizeMode', 'fit');
+  const [pixelStyle, setPixelStyle] = useLocalStorage('pingdou_desktop_pixelStyle', 'square');
+  const [maxColors, setMaxColors] = useLocalStorage('pingdou_desktop_maxColors', '0');
+  const [mergeThreshold, setMergeThreshold] = useLocalStorage('pingdou_desktop_mergeThreshold', [0]);
 
   /* ── 导出菜单 ─────────────────────────────────────────────── */
   const [showExportMenu, setShowExportMenu] = useState(false);  // 导出下拉菜单是否展开
+
+  /* ── 图片放大预览 ──────────────────────────────────────────── */
+  const [isPreviewHovered, setIsPreviewHovered] = useState(false); // 鼠标悬浮在图片上
+  const [zoomPos, setZoomPos] = useState({ top: 0, left: 0 });   // 放大预览浮层的 fixed 坐标
+
+  /* ── 页面挂载时从 IndexedDB 恢复图片 ─────────────────────── */
+  useEffect(() => {
+    (async () => {
+      const savedPreview = await loadImageFromIDB('desktop_preview');
+      if (savedPreview) {
+        setPreview(savedPreview);
+        try {
+          const res = await fetch(savedPreview);
+          const blob = await res.blob();
+          setFile(new File([blob], 'restored.png', { type: blob.type || 'image/png' }));
+        } catch { /* 静默失败，用户重新上传即可 */ }
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* ── 文件拖放回调 — 重置所有状态 ──────────────────────────── */
   const onDrop = useCallback((acceptedFiles: File[]) => {
@@ -146,6 +182,14 @@ function DesktopGeneratorPage() {
       setSvgContent(null);
       setStats(null);
       setHighlightHex(null);
+      // 持久化：把新上传图片存入 IndexedDB
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        if (e.target?.result) {
+          saveImageToIDB('desktop_preview', e.target.result as string);
+        }
+      };
+      reader.readAsDataURL(selectedFile);
     }
   }, []);
 
@@ -155,6 +199,71 @@ function DesktopGeneratorPage() {
     maxFiles: 1
   });
 
+  /* ── AI 图片编辑 — 调用 /api/image/edit 接口 ──────────────── */
+  const handleAIEdit = async () => {
+    if (!file || !aiPrompt.trim()) return;
+    setIsAIEditing(true);
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('prompt', aiPrompt.trim());
+
+    try {
+      const response = await axios.post(`${API_BASE}/api/image/edit`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          ...(sessionId && { 'X-Session-ID': sessionId }),
+        },
+      });
+      const editedUrl = response.data.edited_image_url;
+      // 后端已将图片转为 base64 dataUrl，直接使用，避免前端跨域 fetch
+      const dataUrl: string = response.data.edited_image_data || editedUrl;
+
+      // 将 dataUrl 转为 Blob/File，供生成图纸时上传
+      let newFile: File;
+      if (dataUrl.startsWith('data:')) {
+        const [header, b64] = dataUrl.split(',');
+        const mimeMatch = header.match(/data:([^;]+)/);
+        const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
+        const byteChars = atob(b64);
+        const byteArr = new Uint8Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
+        const blob = new Blob([byteArr], { type: mimeType });
+        newFile = new File([blob], 'ai_edited.png', { type: mimeType });
+      } else {
+        // 降级：后端未能下载，直接用 URL 作为 preview（img src 无跨域限制）
+        newFile = file!;
+      }
+      setPreview(dataUrl.startsWith('data:') ? dataUrl : editedUrl);
+      setFile(newFile);
+      saveImageToIDB('desktop_preview', dataUrl);
+      // 生成完成后关闭 Switch，让提示词/按钮回到置灰状态
+      setUseAIEdit(false);
+      setSvgContent(null);
+      setStats(null);
+      setHighlightHex(null);
+    } catch (error: any) {
+      console.error("AI edit failed:", error);
+      const detail = error?.response?.data?.detail || error?.message;
+      alert(detail ? `AI 编辑失败：${detail}` : "AI 编辑失败，请检查后端服务。");
+    } finally {
+      setIsAIEditing(false);
+    }
+  };
+
+  /* ── AI 结果图下载（下载当前 preview，即已覆盖后的图片） ── */
+  const handleDownloadAIImage = async () => {
+    if (!preview) return;
+    try {
+      const resp = await fetch(preview);
+      const blob = await resp.blob();
+      const ext = blob.type.includes('png') ? 'png' : 'jpg';
+      downloadBlob(blob, ext);
+    } catch {
+      window.open(preview, '_blank');
+    }
+  };
+
   /* ── 生成拼豆图纸 — 调用 /api/generate 接口 ──────────────── */
   const handleGenerate = async () => {
     if (!file) return;
@@ -162,19 +271,19 @@ function DesktopGeneratorPage() {
     setSvgContent(null);
     setStats(null);
 
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('size_mode', sizeMode === 'height' ? 'rows' : 'cols');
-    formData.append('size_value', sizeValue[0].toString());
-    formData.append('quantization_method', quantization);
-    formData.append('dithering', (dithering === 'floyd_steinberg').toString());
-    formData.append('resize_mode', resizeMode);
-    formData.append('max_colors', maxColors);
-    formData.append('merge_threshold', mergeThreshold[0].toString());
-    formData.append('pixel_style', (pixelStyle !== 'square').toString());
-    formData.append('grayscale', grayscaleMode.toString());
-
     try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('size_mode', sizeMode === 'height' ? 'rows' : 'cols');
+      formData.append('size_value', sizeValue[0].toString());
+      formData.append('quantization_method', quantization);
+      formData.append('dithering', (dithering === 'floyd_steinberg').toString());
+      formData.append('resize_mode', resizeMode);
+      formData.append('max_colors', maxColors);
+      formData.append('merge_threshold', mergeThreshold[0].toString());
+      formData.append('pixel_style', (pixelStyle !== 'square').toString());
+      formData.append('grayscale', grayscaleMode.toString());
+
       const response = await axios.post(`${API_BASE}/api/generate`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
@@ -495,36 +604,135 @@ function DesktopGeneratorPage() {
                   <p className="text-[11px] text-neutral-400 mt-1.5 tracking-wide">JPG / PNG / WEBP</p>
                 </div>
               ) : (
-                /* ── 已上传状态: 图片预览卡片 ──
-                    🔧 预览图样式:
-                      h-28: 预览图高度 (112px)，可调大显示更多
-                      object-cover: 裁剪填充
-                      group-hover 悬停盖层: bg-black/40 半透明黑，显示「更换图片」按钮
-                      底部文件名: bg-black/60 胶囊显示文件名 */
-                <div className="relative group rounded-2xl overflow-hidden border border-neutral-200">
-                  <img src={preview} alt="预览" className="w-full h-28 object-cover" />
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); setFile(null); setPreview(null); setSvgContent(null); setStats(null); setHighlightHex(null); }}
-                    className="absolute top-1.5 right-1.5 z-10 opacity-0 group-hover:opacity-100 transition-opacity text-white/80 hover:text-white drop-shadow-md"
-                    title="删除图片"
-                  >
-                    <XCircle className="w-5 h-5" />
-                  </button>
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                    <div {...getRootProps()} className="cursor-pointer">
-                      <input {...getInputProps()} />
-                      <Button variant="secondary" size="sm" className="gap-1.5 text-xs rounded-full">
-                        <Upload className="w-3.5 h-3.5" />
-                        更换图片
-                      </Button>
+                <div
+                  className="relative"
+                  onMouseEnter={() => {
+                    if (previewCardRef.current) {
+                      const rect = previewCardRef.current.getBoundingClientRect();
+                      setZoomPos({ top: rect.top, left: rect.right + 12 });
+                    }
+                    setIsPreviewHovered(true);
+                  }}
+                  onMouseLeave={() => setIsPreviewHovered(false)}
+                >
+                  <div ref={previewCardRef} className="relative group rounded-2xl overflow-hidden border border-neutral-200">
+                    <img src={preview} alt="预览" className="w-full object-contain max-h-48 bg-neutral-50" />
+
+                    {/* 删除按钮（右上角，始终可点） */}
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setFile(null); setPreview(null); setSvgContent(null); setStats(null); setHighlightHex(null); clearAllImagesFromIDB(); }}
+                      className="absolute top-1.5 right-1.5 z-20 opacity-0 group-hover:opacity-100 transition-opacity text-white/80 hover:text-white drop-shadow-md"
+                      title="删除图片"
+                    >
+                      <XCircle className="w-5 h-5" />
+                    </button>
+
+                    {/* AI 生成中 loading 遮罩 */}
+                    {isAIEditing && (
+                      <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center gap-2 z-10">
+                        <Loader2 className="w-8 h-8 text-white animate-spin" />
+                        <span className="text-white text-[11px]">AI 生成中…</span>
+                      </div>
+                    )}
+
+                    {/* 普通悬停操作层（非 AI 生成中） */}
+                    {!isAIEditing && (
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 z-10">
+                        <div {...getRootProps()} className="cursor-pointer">
+                          <input {...getInputProps()} />
+                          <Button variant="secondary" size="sm" className="gap-1.5 text-xs rounded-full">
+                            <Upload className="w-3.5 h-3.5" />
+                            更换图片
+                          </Button>
+                        </div>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="gap-1.5 text-xs rounded-full"
+                          onClick={(e) => { e.stopPropagation(); handleDownloadAIImage(); }}
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          下载图片
+                        </Button>
+                      </div>
+                    )}
+
+                    {/* 底部文件名 */}
+                    <div className="absolute bottom-2 left-2 bg-black/60 text-white text-[10px] px-2 py-0.5 rounded-full max-w-[90%] truncate">
+                      {file?.name}
                     </div>
                   </div>
-                  <div className="absolute bottom-2 left-2 bg-black/60 text-white text-[10px] px-2 py-0.5 rounded-full max-w-[90%] truncate">
-                    {file?.name}
-                  </div>
+
+                  {/* 右侧放大预览浮层（fixed，脱离 overflow 裁切） */}
+                  {isPreviewHovered && !isAIEditing && (
+                    <div
+                      className="fixed z-50 w-[500px] rounded-2xl overflow-hidden border border-neutral-200 bg-white shadow-xl animate-in fade-in zoom-in-95 duration-150"
+                      style={{ top: zoomPos.top, left: zoomPos.left, maxHeight: '900px' }}
+                    >
+                      <img
+                        src={preview}
+                        alt="放大预览"
+                        className="w-full h-full object-contain bg-neutral-50"
+                        style={{ maxHeight: '900px' }}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
+            </div>
+
+            {/* ── AI 图片编辑区域 ────────────────────────────────────
+                Switch 始终可见；提示词 + 按钮始终渲染，通过 disabled 控制可用性 ── */}
+            <div className="px-5 pb-4 pt-1 border-b border-neutral-100">
+              <div className="flex items-center gap-2 text-[14px] font-normal text-black uppercase tracking-widest mb-3 font-pingfang">
+                <Sparkles className="w-3.5 h-3.5" />
+                AI 图片编辑
+              </div>
+
+              {/* 启用开关 — 生成中时禁用，防止状态混乱 */}
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-[13px] font-medium text-neutral-700 tracking-wide font-pingfang">
+                  启用 AI 编辑
+                </div>
+                <Switch
+                  checked={useAIEdit}
+                  onCheckedChange={setUseAIEdit}
+                  disabled={isAIEditing}
+                />
+              </div>
+              <p className="text-[11px] text-neutral-400 leading-relaxed mb-3">
+                开启后可通过提示词对上传图片进行 AI 风格化编辑
+              </p>
+
+              {/* 提示词 + 生成按钮 — 始终渲染，disabled 状态由 aiControlsDisabled 控制 */}
+              {(() => {
+                const aiControlsDisabled = !useAIEdit || !preview || isAIEditing;
+                return (
+                  <div className={`space-y-2.5 transition-opacity duration-200 ${aiControlsDisabled ? 'opacity-50' : 'opacity-100'}`}>
+                    <Input
+                      placeholder="输入提示词，例如：转换为像素艺术风格，白色背景"
+                      value={aiPrompt}
+                      onChange={(e) => setAiPrompt(e.target.value)}
+                      disabled={aiControlsDisabled}
+                      readOnly={aiControlsDisabled}
+                      className="h-9 text-xs rounded-lg"
+                    />
+                    <Button
+                      variant="outline"
+                      className="w-full h-9 text-xs rounded-lg gap-1.5 border-neutral-300 hover:bg-neutral-50 active:scale-[0.98] transition-all duration-200"
+                      onClick={handleAIEdit}
+                      disabled={aiControlsDisabled || !aiPrompt.trim()}
+                    >
+                      {isAIEditing ? (
+                        <><Loader2 className="w-3.5 h-3.5 animate-spin" />AI 生成中...</>
+                      ) : (
+                        <><Sparkles className="w-3.5 h-3.5" />AI 生成</>
+                      )}
+                    </Button>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* ── 参数调整区域 ──────────────────────────────────────

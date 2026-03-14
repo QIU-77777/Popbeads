@@ -14,23 +14,6 @@ import numpy as np
 _LOG_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # 项目根目录
 logger = logging.getLogger("pingdou")
 logger.setLevel(logging.INFO)
-if not logger.handlers:
-    _fmt = logging.Formatter(
-        "%(asctime)s | %(levelname)s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-    # 文件日志 — 只读文件系统（如 Vercel）下自动跳过
-    _log_path = os.path.join(_LOG_DIR, "pingdou.log")
-    try:
-        _fh = logging.FileHandler(_log_path, encoding="utf-8")
-        _fh.setFormatter(_fmt)
-        logger.addHandler(_fh)
-    except OSError:
-        pass
-    _sh = logging.StreamHandler()
-    _sh.setFormatter(_fmt)
-    logger.addHandler(_sh)
-
 # ---------------------------------------------------------------------------
 # 类型别名
 # ---------------------------------------------------------------------------

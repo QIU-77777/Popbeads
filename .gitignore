@@ -23,6 +23,9 @@ Thumbs.db
 .DS_Store
 nul
 
+# 环境变量（含密钥，禁止提交）
+.env
+
 # 项目运行时产物
 pingdou.log
 .ruff_cache/
@@ -30,3 +33,7 @@ pingdou.log
 
 # 生成的图纸和统计（保留 pic/ 下的示例）
 backend/pic/
+backend/pingdou.log
+
+# AI 生成的图像（禁止提交）
+ai_images/
